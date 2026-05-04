@@ -13,7 +13,10 @@
   },
   "scripts": {
     "build": "npm run build:client && tsc -p tsconfig.build.json",
-    "build:client": "node esbuild.client.js"
+    "build:client": "node esbuild.client.js",
+    "test": "vitest run client/src/consoleUtils.test.ts",
+    "test:ci": "vitest run client/src/consoleUtils.test.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "files": [
     "dist",

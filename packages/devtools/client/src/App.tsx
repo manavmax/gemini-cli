@@ -4,8 +4,22 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { useDevToolsData, type ConsoleLog, type NetworkLog } from './hooks';
+import React, {
+  useState,
+  useEffect,
+  useRef,
+  useMemo,
+  useDeferredValue,
+} from 'react';
+import { useDevToolsData, type ConsoleLog, type NetworkLog } from './hooks.js';
+import {
+  CONSOLE_LOG_TYPES,
+  countConsoleLogsByType,
+  filterConsoleLogs,
+  getConsoleLogTypeLabel,
+  isConsoleLogType,
+  type ConsoleLogTypeFilter,
+} from './consoleUtils.js';
 
 type ThemeMode = 'light' | 'dark' | null; // null means follow system
 
@@ -121,9 +135,17 @@ export default function App() {
             const timestamp = parsed.timestamp;
 
             if (type === 'console') {
+              const importedType = isConsoleLogType(payload.type)
+                ? payload.type
+                : 'log';
               consoleLogs.push({
-                ...payload,
-                type,
+                content:
+                  typeof payload.content === 'string' ? payload.content : '',
+                sessionId:
+                  typeof parsed.sessionId === 'string'
+                    ? parsed.sessionId
+                    : undefined,
+                type: importedType,
                 timestamp,
                 id: payload.id || Math.random().toString(36).substring(2, 11),
               });
@@ -134,7 +156,6 @@ export default function App() {
               if (!networkMap.has(id)) {
                 networkMap.set(id, {
                   ...payload,
-                  type,
                   timestamp,
                   id,
                 } as NetworkLog);
@@ -144,8 +165,7 @@ export default function App() {
                 networkMap.set(id, {
                   ...existing,
                   ...payload,
-                  // Ensure we don't overwrite the original timestamp or type
-                  type: existing.type,
+                  // Ensure we don't overwrite the original timestamp.
                   timestamp: existing.timestamp,
                 } as NetworkLog);
               }
@@ -607,6 +627,8 @@ function TabButton({
 
 // --- Console Components ---
 
+const CONSOLE_AUTO_FOLLOW_THRESHOLD_PX = 48;
+
 function ConsoleLogEntry({ log, t }: { log: ConsoleLog; t: ThemeColors }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const content = log.content || '';
@@ -620,9 +642,37 @@ function ConsoleLogEntry({ log, t }: { log: ConsoleLog; t: ThemeColors }) {
 
   const isError = log.type === 'error';
   const isWarn = log.type === 'warn';
+  const isInfo = log.type === 'info';
+  const isDebug = log.type === 'debug';
   const bg = isError ? t.errorBg : isWarn ? t.warnBg : 'transparent';
   const color = isError ? t.errorText : isWarn ? t.warnText : t.text;
-  const icon = isError ? '❌' : isWarn ? '⚠️' : ' ';
+  const icon = isError
+    ? '❌'
+    : isWarn
+      ? '⚠️'
+      : isInfo
+        ? 'ℹ️'
+        : isDebug
+          ? '🐞'
+          : '•';
+  const iconColor = isError
+    ? t.errorText
+    : isWarn
+      ? t.warnText
+      : isInfo
+        ? t.accent
+        : t.textSecondary;
+  const badgeColor = isError
+    ? t.errorText
+    : isWarn
+      ? t.warnText
+      : isInfo
+        ? t.accent
+        : isDebug
+          ? t.textSecondary
+          : t.text;
+  const badgeBg = isError ? t.errorBg : isWarn ? t.warnBg : t.bgSecondary;
+  const typeLabel = getConsoleLogTypeLabel(log.type);
 
   let displayContent = content;
   if (needsCollapse && !isExpanded) {
@@ -647,6 +697,10 @@ function ConsoleLogEntry({ log, t }: { log: ConsoleLog; t: ThemeColors }) {
         alignItems: 'flex-start',
 
         gap: '8px',
+
+        contentVisibility: 'auto',
+
+        containIntrinsicSize: '72px',
       }}
     >
       <div
@@ -660,7 +714,10 @@ function ConsoleLogEntry({ log, t }: { log: ConsoleLog; t: ThemeColors }) {
           fontSize: '10px',
 
           marginTop: '2px',
+
+          color: iconColor,
         }}
+        title={typeLabel}
       >
         {icon}
       </div>
@@ -674,6 +731,46 @@ function ConsoleLogEntry({ log, t }: { log: ConsoleLog; t: ThemeColors }) {
           flexDirection: 'column',
         }}
       >
+        <div
+          style={{
+            display: 'flex',
+
+            alignItems: 'center',
+
+            gap: '8px',
+
+            marginBottom: '4px',
+          }}
+        >
+          <span
+            style={{
+              display: 'inline-flex',
+
+              alignItems: 'center',
+
+              borderRadius: '999px',
+
+              border: `1px solid ${t.border}`,
+
+              background: badgeBg,
+
+              color: badgeColor,
+
+              fontSize: '9px',
+
+              fontWeight: 700,
+
+              letterSpacing: '0.03em',
+
+              padding: '1px 6px',
+
+              textTransform: 'uppercase',
+            }}
+          >
+            {typeLabel}
+          </span>
+        </div>
+
         <div
           style={{
             whiteSpace: 'pre-wrap',
@@ -703,7 +800,8 @@ function ConsoleLogEntry({ log, t }: { log: ConsoleLog; t: ThemeColors }) {
         }}
       >
         {needsCollapse && (
-          <div
+          <button
+            type="button"
             onClick={() => setIsExpanded(!isExpanded)}
             style={{
               fontSize: '12px',
@@ -735,16 +833,17 @@ function ConsoleLogEntry({ log, t }: { log: ConsoleLog; t: ThemeColors }) {
               transition: 'all 0.1s',
             }}
             onMouseOver={(e) => {
-              (e.currentTarget as HTMLDivElement).style.background = t.bgHover;
+              (e.currentTarget as HTMLButtonElement).style.background =
+                t.bgHover;
             }}
             onMouseOut={(e) => {
-              (e.currentTarget as HTMLDivElement).style.background =
+              (e.currentTarget as HTMLButtonElement).style.background =
                 t.bgSecondary;
             }}
             title={isExpanded ? 'Collapse' : 'Expand'}
           >
             {isExpanded ? '−' : '+'}
-          </div>
+          </button>
         )}
 
         <div
@@ -775,12 +874,115 @@ function ConsoleLogEntry({ log, t }: { log: ConsoleLog; t: ThemeColors }) {
   );
 }
 
+function ConsoleFilterChip({
+  label,
+  count,
+  active,
+  onClick,
+  t,
+}: {
+  label: string;
+  count: number;
+  active: boolean;
+  onClick: () => void;
+  t: ThemeColors;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '6px',
+        padding: '4px 10px',
+        borderRadius: '999px',
+        border: `1px solid ${active ? t.accent : t.border}`,
+        background: active ? t.accent : t.bg,
+        color: active ? '#fff' : t.text,
+        cursor: 'pointer',
+        fontSize: '11px',
+        fontWeight: 600,
+      }}
+    >
+      <span>{label}</span>
+      <span
+        style={{
+          borderRadius: '999px',
+          background: active ? 'rgba(255, 255, 255, 0.2)' : t.bgSecondary,
+          color: active ? '#fff' : t.textSecondary,
+          padding: '0 6px',
+          fontSize: '10px',
+          lineHeight: 1.6,
+        }}
+      >
+        {count}
+      </span>
+    </button>
+  );
+}
+
 function ConsoleView({ logs, t }: { logs: ConsoleLog[]; t: ThemeColors }) {
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const deferredSearchQuery = useDeferredValue(searchQuery);
+  const [typeFilter, setTypeFilter] = useState<ConsoleLogTypeFilter>('all');
+  const [isFollowingLatest, setIsFollowingLatest] = useState(true);
+
+  const consoleLogCounts = useMemo(() => countConsoleLogsByType(logs), [logs]);
+
+  const filteredLogs = useMemo(
+    () =>
+      filterConsoleLogs(logs, {
+        query: deferredSearchQuery,
+        type: typeFilter,
+      }),
+    [logs, deferredSearchQuery, typeFilter],
+  );
+
+  const hasActiveFilters =
+    searchQuery.trim().length > 0 || typeFilter !== 'all';
+  const shouldShowJumpToLatest = !isFollowingLatest && filteredLogs.length > 0;
+  const latestFilteredLogId = filteredLogs[filteredLogs.length - 1]?.id;
+  const visibleLogCountLabel =
+    filteredLogs.length === logs.length
+      ? `${logs.length} logs`
+      : `Showing ${filteredLogs.length} of ${logs.length} logs`;
+
+  const scrollToBottom = () => {
+    const list = listRef.current;
+    if (!list) {
+      return;
+    }
+
+    list.scrollTo({
+      top: list.scrollHeight,
+      behavior: 'auto',
+    });
+  };
+
+  const updateFollowState = () => {
+    const list = listRef.current;
+    if (!list) {
+      return;
+    }
+
+    const distanceFromBottom =
+      list.scrollHeight - list.scrollTop - list.clientHeight;
+    const isNearBottom = distanceFromBottom <= CONSOLE_AUTO_FOLLOW_THRESHOLD_PX;
+
+    setIsFollowingLatest((previousValue) =>
+      previousValue === isNearBottom ? previousValue : isNearBottom,
+    );
+  };
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [logs.length]);
+    if (!isFollowingLatest) {
+      return;
+    }
+
+    scrollToBottom();
+  }, [latestFilteredLogId, isFollowingLatest]);
 
   if (logs.length === 0) {
     return (
@@ -806,8 +1008,9 @@ function ConsoleView({ logs, t }: { logs: ConsoleLog[]; t: ThemeColors }) {
     <div
       style={{
         flex: 1,
-
-        overflowY: 'auto',
+        display: 'flex',
+        flexDirection: 'column',
+        position: 'relative',
 
         fontFamily:
           'SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace',
@@ -817,11 +1020,163 @@ function ConsoleView({ logs, t }: { logs: ConsoleLog[]; t: ThemeColors }) {
         fontSize: '12px',
       }}
     >
-      {logs.map((log) => (
-        <ConsoleLogEntry key={log.id} log={log} t={t} />
-      ))}
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '8px',
+          padding: '8px',
+          background: t.bgSecondary,
+          borderBottom: `1px solid ${t.border}`,
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            gap: '8px',
+            alignItems: 'center',
+          }}
+        >
+          <input
+            type="text"
+            placeholder="Search log content or severity..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            style={{
+              flex: 1,
+              boxSizing: 'border-box',
+              padding: '6px 10px',
+              background: t.bg,
+              color: t.text,
+              border: `1px solid ${t.border}`,
+              borderRadius: '6px',
+              fontSize: '12px',
+            }}
+          />
+          {hasActiveFilters && (
+            <button
+              type="button"
+              onClick={() => {
+                setSearchQuery('');
+                setTypeFilter('all');
+              }}
+              style={{
+                padding: '6px 10px',
+                borderRadius: '6px',
+                border: `1px solid ${t.border}`,
+                background: t.bg,
+                color: t.text,
+                cursor: 'pointer',
+                fontSize: '11px',
+                fontWeight: 600,
+              }}
+            >
+              Clear
+            </button>
+          )}
+        </div>
 
-      <div ref={bottomRef} />
+        <div
+          style={{
+            display: 'flex',
+            gap: '6px',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+          }}
+        >
+          <ConsoleFilterChip
+            label="All"
+            count={logs.length}
+            active={typeFilter === 'all'}
+            onClick={() => setTypeFilter('all')}
+            t={t}
+          />
+          {CONSOLE_LOG_TYPES.map((logType) => (
+            <ConsoleFilterChip
+              key={logType}
+              label={getConsoleLogTypeLabel(logType)}
+              count={consoleLogCounts[logType]}
+              active={typeFilter === logType}
+              onClick={() =>
+                setTypeFilter((previousValue) =>
+                  previousValue === logType ? 'all' : logType,
+                )
+              }
+              t={t}
+            />
+          ))}
+          <span
+            style={{
+              marginLeft: 'auto',
+              color: t.textSecondary,
+              fontSize: '11px',
+            }}
+          >
+            {visibleLogCountLabel}
+          </span>
+          <span
+            style={{
+              color: isFollowingLatest ? t.textSecondary : t.accent,
+              fontSize: '11px',
+              fontWeight: 600,
+            }}
+          >
+            {isFollowingLatest ? 'Following live output' : 'Auto-follow paused'}
+          </span>
+        </div>
+      </div>
+
+      <div
+        ref={listRef}
+        onScroll={updateFollowState}
+        style={{
+          flex: 1,
+          overflowY: 'auto',
+        }}
+      >
+        {filteredLogs.length > 0 ? (
+          filteredLogs.map((log) => (
+            <ConsoleLogEntry key={log.id} log={log} t={t} />
+          ))
+        ) : (
+          <div
+            style={{
+              padding: '20px',
+              color: t.textSecondary,
+              fontSize: '11px',
+              textAlign: 'center',
+            }}
+          >
+            No logs match the current filters
+          </div>
+        )}
+      </div>
+
+      {shouldShowJumpToLatest && (
+        <button
+          type="button"
+          onClick={() => {
+            setIsFollowingLatest(true);
+            scrollToBottom();
+          }}
+          style={{
+            position: 'absolute',
+            right: '16px',
+            bottom: '16px',
+            padding: '8px 12px',
+            borderRadius: '999px',
+            border: `1px solid ${t.accent}`,
+            background: t.accent,
+            color: '#fff',
+            cursor: 'pointer',
+            fontSize: '11px',
+            fontWeight: 700,
+            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.2)',
+          }}
+        >
+          Jump to latest
+        </button>
+      )}
     </div>
   );
 }
