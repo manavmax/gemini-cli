@@ -138,7 +138,7 @@ describe('terminalSetup', () => {
     });
 
     it('should upgrade existing multiline-only setup with paste bindings', async () => {
-      process.env['TERM_PROGRAM'] = 'vscode';
+      vi.stubEnv('TERM_PROGRAM', 'vscode');
       const existingBindings = [
         {
           key: 'shift+enter',
